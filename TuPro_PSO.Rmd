@@ -1,0 +1,219 @@
+---
+title: "Untitled"
+author: "yora"
+date: "2025-06-09"
+output: html_document
+---
+
+1. Data Balita
+```{r}
+Balita <- data.frame( Nama = "Meri", Umur = 2.7, BB = 12.7, TB = 95
+  )
+print(Balita)
+```
+
+2. Kategori Makanan
+```{r}
+library(dplyr)
+
+Kategori_Makanan <- data.frame(
+  Kode = c("PH", "PN", "L", "K", "SA", "G", "B", "S"),
+  Kategori = c("Protein Hewani", "Protein Nabati", "Lemak", "Karbohidrat", "Sayur", "Gula", "Buah", "Susu"),Jumlah_Anggota = c(10, 8, 4, 7, 8, 8, 4, 5),
+  Indeks_Dimensi = c("1-10", "11-18", "19-22", "23-29", "30-37", "38-45", "46-49", "50-54"))
+
+kategori_index_range <- Kategori_Makanan %>%
+  mutate(
+    start = cumsum(lag(Jumlah_Anggota, default = 0)) + 1,
+    end = cumsum(Jumlah_Anggota)
+  )
+
+print(Kategori_Makanan)
+```
+
+3. Kandung Gizi dan Harga Makanan Per 100 gram
+```{r}
+library(readxl)
+data_makanan <- read_excel("C:/Users/rizqi/Downloads/DataMakanan.xlsx")
+```
+
+4. Parameter PSO
+```{r}
+set.seed(123)
+Jumlah_Partikel <- 5
+Jumlah_Dimensi <- 168
+C1 <- 2
+C2 <- 2
+rand1 <- 0.95
+rand2 <- 0.5
+IterMax <- 50
+Wmin <- 0.4
+Wmax <- 0.7
+Batas_Atas <- 25
+
+kategori_ulang <- rep(Kategori_Makanan$Jumlah_Anggota, length.out = Jumlah_Dimensi)
+```
+
+5. Kebutuhan Gizi
+```{r}
+BBI <- (Balita$BB*2) + 8
+Keb.Energi <- ifelse(Balita$BB <=3, 100*BBI, 90*BBI)
+Keb.Protein <- (0.1*Keb.Energi)/4
+Keb.Lemak <- (0.2*Keb.Energi)/9
+Keb.Karbohidrat <- (0.7*Keb.Energi)/4
+
+kebutuhan_gizi <- list(
+  energi = Keb.Energi,
+  protein = Keb.Protein,
+  lemak = Keb.Lemak,
+  karbo = Keb.Karbohidrat
+)
+
+cat("BBI:", BBI, "kg\n")
+cat("Kebutuhan Energi:", Keb.Energi, "kalori\n")
+cat("Kebutuhan Protein:", Keb.Protein, "gram\n")
+cat("Kebutuhan Lemak:", Keb.Lemak, "gram\n")
+cat("Kebutuhan Karbohidrat:", Keb.Karbohidrat, "gram\n")
+```
+6. Inisialisasi Partikel dan Kecepatan
+```{r}
+particles <- matrix(sample(1:Batas_Atas, Jumlah_Partikel * Jumlah_Dimensi, replace = TRUE),
+                    nrow = Jumlah_Partikel,
+                    ncol = Jumlah_Dimensi)
+velocity <- matrix(0, nrow = Jumlah_Partikel, ncol = Jumlah_Dimensi)
+print(particles)
+```
+
+7. Fungsi Konversi dan Fungsi Fitness
+```{r}
+konversi_indeks <- function(x, y, z) {
+  floor((x - 1) * ((y - 1) / (z - 1)) + 1)
+}
+
+fitness_function <- function(selection) {
+  
+   idx_makanan <- mapply(konversi_indeks, x = kategori_ulang, y = selection, MoreArgs = list(z = Batas_Atas))
+  makanan_terpilih <- data_makanan[idx_makanan, ]
+
+  total_energi <- sum(makanan_terpilih$`Energi(kkal)`)
+  total_protein <- sum(makanan_terpilih$`Protein(g)`)
+  total_lemak <- sum(makanan_terpilih$`Lemak(g)`)
+  total_karbo <- sum(makanan_terpilih$`Karbohidrat(g)`)
+  total_harga <- sum(makanan_terpilih$Harga)
+  variasi <- length(unique(idx_makanan))
+
+  penalty <- abs(total_energi - kebutuhan_gizi$energi) +
+             abs(total_protein - kebutuhan_gizi$protein) +
+             abs(total_lemak - kebutuhan_gizi$lemak) +
+             abs(total_karbo - kebutuhan_gizi$karbo)
+
+  fitness <- (1 / penalty) * 1e5 + (1 / total_harga) * 1e6 + variasi
+  return(fitness)
+}
+```
+
+8. Iterasi PSO
+```{r}
+pbest <- particles
+pbest_fitness <- apply(pbest, 1, fitness_function)
+gbest <- pbest[which.max(pbest_fitness), ]
+gbest_fitness <- max(pbest_fitness)
+riwayat_fitness <- list()  
+
+for (iter in 1:IterMax) {
+  w <- Wmax - ((Wmax - Wmin) / IterMax) * iter
+  for (i in 1:Jumlah_Partikel) {
+    r1 <- runif(Jumlah_Dimensi)
+    r2 <- runif(Jumlah_Dimensi)
+
+    velocity[i, ] <- w * velocity[i, ] +
+                     C1 * r1 * (pbest[i, ] - particles[i, ]) +
+                     C2 * r2 * (gbest - particles[i, ])
+
+    particles[i, ] <- round(particles[i, ] + velocity[i, ])
+    particles[i, ] <- pmax(1, pmin(Batas_Atas, particles[i, ]))
+
+    fit <- fitness_function(particles[i, ])
+    if (fit > pbest_fitness[i]) {
+      pbest[i, ] <- particles[i, ]
+      pbest_fitness[i] <- fit
+      if (fit > gbest_fitness) {
+        gbest <- particles[i, ]
+        gbest_fitness <- fit
+      }
+    }
+  }
+  riwayat_fitness[[iter]] <- pbest_fitness
+  
+  cat("Iterasi", iter, "- Gbest Fitness:", gbest_fitness, "- dari Partikel:", which.max(pbest_fitness), "\n")
+}
+```
+
+```{r}
+gbest_index_partikel <- which.max(pbest_fitness)
+cat("\n Gbest ditemukan pada Partikel ke-", gbest_index_partikel, "\n")
+```
+
+9. Tabel Pertikel ke-3
+```{r}
+extract_sesi <- function(vektor) {
+  sesi_data <- matrix(nrow = 3, ncol = 8)
+  for (i in 0:2) {
+    sesi_start <- (i * 8) + 1
+    sesi_end <- sesi_start + 7
+    sesi_data[i + 1, ] <- vektor[sesi_start:sesi_end]
+  }
+  colnames(sesi_data) <- c("PH", "PN", "L", "K", "SA", "B", "S", "G")
+  return(as.data.frame(sesi_data))
+}
+
+gbest_sesi_awal <- extract_sesi(gbest)
+gbest_sesi_awal$Waktu <- c("Pagi", "Siang", "Malam")
+tabel_gbest_awal <- gbest_sesi_awal[, c("Waktu", "PH", "PN", "L", "K", "SA", "B", "S", "G")]
+
+cat("\n Nilai Partikel Gbest (sebelum dikonversi):\n")
+print(tabel_gbest_awal, row.names = FALSE)
+```
+
+10. Konversi Nilai Indeks
+```{r}
+kategori_index_range <- Kategori_Makanan %>%
+  mutate(
+    start = cumsum(lag(Jumlah_Anggota, default = 0)) + 1,
+    end = cumsum(Jumlah_Anggota)
+  )
+
+posisi_awal_kategori <- rep(kategori_index_range$start, length.out = Jumlah_Dimensi)
+
+kategori_ulang <- rep(Kategori_Makanan$Jumlah_Anggota, length.out = Jumlah_Dimensi)
+
+gbest_index_relatif <- mapply(konversi_indeks, x = kategori_ulang, y = gbest, MoreArgs = list(z = Batas_Atas))
+
+gbest_index <- posisi_awal_kategori - 1 + gbest_index_relatif
+
+gbest_sesi_konversi <- extract_sesi(gbest_index)
+gbest_sesi_konversi$Waktu <- c("Pagi", "Siang", "Malam")
+tabel_gbest_konversi <- gbest_sesi_konversi[, c("Waktu", "PH", "PN", "L", "K", "SA", "B", "S", "G")]
+
+cat("\n Gbest Setelah Dikonversi ke Indeks Makanan (Absolut):\n")
+print(tabel_gbest_konversi, row.names = FALSE)
+```
+
+11. Tabel Optimasi
+```{r}
+rekomendasi_makanan <- data_makanan[gbest_index, ]
+
+# Buat kolom Waktu dan Kategori untuk tampilan rapi
+Waktu <- rep(c("Pagi", "Siang", "Malam"), each = 8, length.out = nrow(rekomendasi_makanan))
+Kategori <- rep(c("PH", "PN", "L", "K", "SA", "B", "S", "G"), length.out = nrow(rekomendasi_makanan))
+
+tabel_menu_gbest <- data.frame(
+  Waktu = Waktu,
+  Kategori = Kategori,
+  Nama_Makanan = rekomendasi_makanan$`Nama Makanan`
+)
+
+cat("\n Tabel Menu Makanan Gbest (Sudah Dikonversi):\n")
+print(tabel_menu_gbest, row.names = FALSE)
+
+```
+
